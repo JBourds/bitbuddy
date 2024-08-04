@@ -1,3 +1,5 @@
+#![allow(warnings)]
+mod bitfield;
 mod bitmap;
 mod errors;
 mod math;

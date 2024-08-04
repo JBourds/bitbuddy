@@ -1060,8 +1060,14 @@ mod tests {
         // Verify clearing out of bounds changes nothing
         // Start index out of bounds
         let start_index = length;
-        assert_eq!(bitfield.clear_region_bits(start_index, 0), Err(BitmapError::IteratorOutOfBounds));
-        assert_eq!(bitfield.clear_region_bits(0, length + 1), Err(BitmapError::IteratorOutOfBounds));
+        assert_eq!(
+            bitfield.clear_region_bits(start_index, 0),
+            Err(BitmapError::IteratorOutOfBounds)
+        );
+        assert_eq!(
+            bitfield.clear_region_bits(0, length + 1),
+            Err(BitmapError::IteratorOutOfBounds)
+        );
 
         // Check that nothing changed
         for i in 0..NUM_WORDS {
@@ -1074,7 +1080,7 @@ mod tests {
         bitfield.clear_region_bits(start_offset, length).unwrap();
         assert_eq!(1023, memory[0]); // Only have the lowest 10 bits remaining, 2 ^ 10 - 1 = 1023
         assert_eq!(Word::FULL & !((1 << 13) - 1), memory[1]); // Clears the first 13 bits of the second word, (2 ^ 31 - 1) - (2 ^ 13 - 1) = 4294959104
-                                           // Verify none of the other words were affected
+                                                              // Verify none of the other words were affected
         for i in 2..NUM_WORDS {
             assert_eq!(Word::FULL, memory[i]);
         }

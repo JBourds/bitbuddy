@@ -57,4 +57,3 @@ impl Word {
     pub const FULL: usize = usize::MAX;
     pub const EMPTY: usize = usize::MIN;
 }
-
