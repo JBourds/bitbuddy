@@ -109,7 +109,7 @@ macro_rules! bitfield {
                         // Slow implementation due to using usize for bits
                         let mut mask = (2_usize.pow($bits as u32) - 1) << start_offset;
                         while current_bit <= end_bit {
-                            let byte_mask = mask & std::u8::MAX as usize;
+                            let byte_mask = mask & core::u8::MAX as usize;
                             let byte_value = (value & byte_mask) >> start_offset;
 
                             self.bytes[byte_index] &= !byte_mask as u8;
@@ -182,11 +182,11 @@ mod tests {
 
         let mut t = Test::new();
         for i in 0..t.size_bytes() {
-            t.bytes[i] = std::u8::MAX ;
+            t.bytes[i] = core::u8::MAX ;
         }
-        assert_eq!(t.get_a(), std::u32::MAX as usize);
-        assert_eq!(t.get_b(), std::u16::MAX as usize);
-        assert_eq!(t.get_c(), (std::u8::MAX >> 3) as usize);
+        assert_eq!(t.get_a(), core::u32::MAX as usize);
+        assert_eq!(t.get_b(), core::u16::MAX as usize);
+        assert_eq!(t.get_c(), (core::u8::MAX >> 3) as usize);
     }
 
     #[test]
@@ -204,7 +204,6 @@ mod tests {
         t.set_a(7).unwrap();
         assert_eq!(t.bytes[0], 7);
         t.set_a(6).unwrap();
-        println!("{:?}", t);
         assert_eq!(t.bytes[0], 6);
 
         // Check writing a value too larger

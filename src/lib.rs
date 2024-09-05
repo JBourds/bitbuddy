@@ -1,4 +1,5 @@
 #![allow(warnings)]
+#![no_std]
 mod bitfield;
 mod bitmap;
 mod errors;
