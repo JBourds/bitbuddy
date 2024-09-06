@@ -54,7 +54,7 @@ macro_rules! bitfield {
         }
 
          impl $name {
-            pub fn new() -> $name {
+            fn __new() -> $name {
                 $name {
                     bytes: [0; $crate::bytes_required!($($bits),*)],
                 }
@@ -144,13 +144,13 @@ mod tests {
     #[test]
     fn test_struct_create() {
         bitfield! { Test {} };
-        let t = Test::new();
+        let t = Test::__new();
         bitfield! {
             Test2 {
                 (a, 64),
             }
         }
-        let t = Test2::new();
+        let t = Test2::__new();
         assert_eq!(8, t.size_bytes());
         bitfield! {
             Test3 {
@@ -158,14 +158,14 @@ mod tests {
                 (b, 1),
             }
         }
-        let t = Test3::new();
+        let t = Test3::__new();
         assert_eq!(9, t.size_bytes());
         bitfield! {
             Test4 {
                 (a, 0)
             }
         }
-        let t = Test4::new();
+        let t = Test4::__new();
         assert_eq!(0, t.size_bytes());
 
         bitfield! {
@@ -173,7 +173,7 @@ mod tests {
                 (reserved, 9)
             }
         }
-        let t = Test5::new();
+        let t = Test5::__new();
         assert_eq!(t.size_bytes(), 2);
         t.get_reserved();
     }
@@ -188,7 +188,7 @@ mod tests {
             }
         }
 
-        let mut t = Test::new();
+        let mut t = Test::__new();
         for i in 0..t.size_bytes() {
             t.bytes[i] = core::u8::MAX ;
         }
@@ -207,7 +207,7 @@ mod tests {
             }
         }
 
-        let mut t = Test::new();
+        let mut t = Test::__new();
         // Overwrite behavior gets rid of extra bits
         t.set_a(7).unwrap();
         assert_eq!(t.bytes[0], 7);
