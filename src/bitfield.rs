@@ -1,10 +1,8 @@
-use paste::paste;
-
 use super::errors::BitfieldError;
 
-const BITS_IN_BYTE: usize = 8;
-const BITS_IN_WORD: usize = core::mem::size_of::<usize>() * BITS_IN_BYTE;
+pub const BITS_IN_BYTE: usize = 8;
 
+#[macro_export]
 macro_rules! ceiling {
     ($value:expr) => {
         if $value > ($value as usize as f32) {
@@ -16,15 +14,21 @@ macro_rules! ceiling {
 }
 
 /// Figure out how many bytes are requires to represent a value
+#[macro_export]
 macro_rules! bytes_required {
     ($($bits:expr),*) => {
-        ceiling!((0 $(+$bits)*) as f32 / BITS_IN_BYTE as f32)
+        $crate::ceiling!((0 $(+$bits)*) as f32 / $crate::bitfield::BITS_IN_BYTE as f32)
     };
 }
 
 #[macro_export]
 macro_rules! bitfield {
     ($name:ident { $(($field:ident, $bits:expr)),* $(,)? }) => {
+        // TODO: Compile time check for number of bits?
+        // TODO: Have way to exclude get/set methods for fields with a
+        // certain name?
+
+
         /// Figure out how many bits to skip before we get to the target
         macro_rules! shift {
             ($target:ident) => {
@@ -43,22 +47,22 @@ macro_rules! bitfield {
         }
 
 
-        #[derive(Debug)]
+        #[derive(Debug, Default)]
         #[repr(packed)]
-        struct $name {
-            bytes: [u8; bytes_required!($($bits),*)],
-        };
+        pub struct $name {
+            bytes: [u8; $crate::bytes_required!($($bits),*)],
+        }
 
          impl $name {
             pub fn new() -> $name {
                 $name {
-                    bytes: [0; bytes_required!($($bits),*)],
+                    bytes: [0; $crate::bytes_required!($($bits),*)],
                 }
             }
 
             #[inline]
             fn byte_index(shift: usize) -> usize {
-                shift / BITS_IN_BYTE
+                shift / $crate::bitfield::BITS_IN_BYTE
             }
 
             #[inline]
@@ -67,25 +71,22 @@ macro_rules! bitfield {
             }
         }
 
-        paste::paste! {
+        $crate::paste::paste! {
             $(
-                if $bits > BITS_IN_WORD {
-                    panic!("Items in bitfield > {} bits not supported", BITS_IN_WORD);
-                }
                 impl $name {
                     pub fn [<get_ $field>](&self) -> usize {
                         let start_bit = shift!($field);
                         let end_bit = start_bit + $bits;
-                        let start_offset = start_bit % BITS_IN_BYTE;
-                        let end_offset = BITS_IN_BYTE - end_bit % BITS_IN_BYTE;
+                        let start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
+                        let end_offset = $crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE;
                         let mut byte_index = Self::byte_index(start_bit);
                         let mut current_bit = start_bit + start_offset;
                         let mut value = 0;
 
                         while current_bit <= end_bit {
-                            value <<= BITS_IN_BYTE;
+                            value <<= $crate::bitfield::BITS_IN_BYTE;
                             value |= self.bytes[byte_index] as usize;
-                            current_bit += BITS_IN_BYTE;
+                            current_bit += $crate::bitfield::BITS_IN_BYTE;
                             byte_index += 1;
                         }
                         value >>= end_offset;
@@ -100,8 +101,8 @@ macro_rules! bitfield {
 
                         let start_bit = shift!($field);
                         let end_bit = start_bit + $bits;
-                        let start_offset = start_bit % BITS_IN_BYTE;
-                        let end_offset = BITS_IN_BYTE - end_bit % BITS_IN_BYTE;
+                        let start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
+                        let end_offset = $crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE;
                         let mut byte_index = Self::byte_index(start_bit);
                         let mut current_bit = start_bit + start_offset;
 
@@ -115,17 +116,15 @@ macro_rules! bitfield {
                             self.bytes[byte_index] &= !byte_mask as u8;
                             self.bytes[byte_index] |= byte_value as u8;
 
-                            current_bit += BITS_IN_BYTE;
+                            current_bit += $crate::bitfield::BITS_IN_BYTE;
                             byte_index += 1;
-                            mask >>= BITS_IN_BYTE;
-                            value >>= BITS_IN_BYTE;
+                            mask >>= $crate::bitfield::BITS_IN_BYTE;
+                            value >>= $crate::bitfield::BITS_IN_BYTE;
                         }
                          
 
                         Ok(true)
                     }
-
-       
                 }
             )*
         }
@@ -150,7 +149,7 @@ mod tests {
             Test2 {
                 (a, 64),
             }
-        };
+        }
         let t = Test2::new();
         assert_eq!(8, t.size_bytes());
         bitfield! {
@@ -158,16 +157,25 @@ mod tests {
                 (a, 64),
                 (b, 1),
             }
-        };
+        }
         let t = Test3::new();
         assert_eq!(9, t.size_bytes());
         bitfield! {
             Test4 {
                 (a, 0)
             }
-        };
+        }
         let t = Test4::new();
         assert_eq!(0, t.size_bytes());
+
+        bitfield! {
+            Test5 {
+                (reserved, 9)
+            }
+        }
+        let t = Test5::new();
+        assert_eq!(t.size_bytes(), 2);
+        t.get_reserved();
     }
 
     #[test]
@@ -178,7 +186,7 @@ mod tests {
                 (b, 16),
                 (c, 5),
             }
-        };
+        }
 
         let mut t = Test::new();
         for i in 0..t.size_bytes() {
@@ -197,7 +205,7 @@ mod tests {
                 (b, 16),
                 (c, 5),
             }
-        };
+        }
 
         let mut t = Test::new();
         // Overwrite behavior gets rid of extra bits

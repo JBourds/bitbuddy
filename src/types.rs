@@ -25,31 +25,31 @@ pub enum BitStatus {
     Free,
 }
 
-pub struct Byte;
+pub(crate) struct Byte;
 
 impl Byte {
     pub const SIZE_BITS: usize = 8;
 }
 
-pub struct Kilobyte;
+pub(crate) struct Kilobyte;
 
 impl Kilobyte {
     pub const SIZE_BYTES: usize = 1024;
 }
 
-pub struct Megabyte;
+pub(crate) struct Megabyte;
 
 impl Megabyte {
     pub const SIZE_BYTES: usize = 1024 * Kilobyte::SIZE_BYTES;
 }
 
-pub struct Gigabyte;
+pub(crate) struct Gigabyte;
 
 impl Gigabyte {
     pub const SIZE_BYTES: usize = 1024 * Megabyte::SIZE_BYTES;
 }
 
-pub struct Word;
+pub(crate) struct Word;
 
 impl Word {
     pub const SIZE_BYTES: usize = core::mem::size_of::<usize>();
