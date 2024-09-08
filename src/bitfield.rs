@@ -47,7 +47,7 @@ macro_rules! bitfield {
         }
 
 
-        #[derive(Debug, Default)]
+        #[derive(Copy, Clone, Debug, Default)]
         #[repr(packed)]
         pub struct $name {
             bytes: [u8; $crate::bytes_required!($($bits),*)],
@@ -80,12 +80,13 @@ macro_rules! bitfield {
                         let start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
                         let end_offset = $crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE;
                         let mut byte_index = Self::byte_index(start_bit);
-                        let mut current_bit = start_bit + start_offset;
+                        let mut current_bit = start_bit;
                         let mut value = 0;
 
                         while current_bit <= end_bit {
                             value <<= $crate::bitfield::BITS_IN_BYTE;
-                            value |= self.bytes[byte_index] as usize;
+                            value |= ((self.bytes[byte_index] as usize) >> (start_offset));
+                            let start_offset = 0; // Only have an offset for the first loop
                             current_bit += $crate::bitfield::BITS_IN_BYTE;
                             byte_index += 1;
                         }
@@ -104,24 +105,21 @@ macro_rules! bitfield {
                         let start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
                         let end_offset = $crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE;
                         let mut byte_index = Self::byte_index(start_bit);
-                        let mut current_bit = start_bit + start_offset;
+                        let mut current_bit = start_bit;
 
-                        // Update mask as we go
-                        // Slow implementation due to using usize for bits
                         let mut mask = (2_usize.pow($bits as u32) - 1) << start_offset;
                         while current_bit <= end_bit {
-                            let byte_mask = mask & core::u8::MAX as usize;
-                            let byte_value = (value & byte_mask) >> start_offset;
+                            let byte_value = (value << start_offset & mask) >> start_offset;
 
-                            self.bytes[byte_index] &= !byte_mask as u8;
-                            self.bytes[byte_index] |= byte_value as u8;
+                            self.bytes[byte_index] &= !mask as u8;
+                            self.bytes[byte_index] |= (byte_value << start_offset) as u8;
+                            let start_offset = 0; // Offset only applies for first loop
 
                             current_bit += $crate::bitfield::BITS_IN_BYTE;
                             byte_index += 1;
                             mask >>= $crate::bitfield::BITS_IN_BYTE;
                             value >>= $crate::bitfield::BITS_IN_BYTE;
                         }
-                         
 
                         Ok(true)
                     }
@@ -185,6 +183,7 @@ mod tests {
                 (a, 32),
                 (b, 16),
                 (c, 5),
+                (d, 1),
             }
         }
 
@@ -195,6 +194,7 @@ mod tests {
         assert_eq!(t.get_a(), core::u32::MAX as usize);
         assert_eq!(t.get_b(), core::u16::MAX as usize);
         assert_eq!(t.get_c(), (core::u8::MAX >> 3) as usize);
+        assert_eq!(t.get_d(), 1);
     }
 
     #[test]
@@ -204,10 +204,12 @@ mod tests {
                 (a, 32),
                 (b, 16),
                 (c, 5),
+                (d, 1),
             }
         }
 
         let mut t = Test::__new();
+        assert_eq!(7, t.size_bytes());
         // Overwrite behavior gets rid of extra bits
         t.set_a(7).unwrap();
         assert_eq!(t.bytes[0], 7);
@@ -229,5 +231,55 @@ mod tests {
         t.set_c(value).unwrap();
         let expected = [6, 0, 0, 0, 0, 0, value as u8];
         assert_eq!(expected, t.bytes);
+
+        // Verify setting a single bit works
+        assert_eq!(t.bytes[6], value as u8);
+        t.set_d(1).unwrap();
+        assert_eq!(t.bytes[6], (1 << 5) | value as u8);
+        t.set_d(0).unwrap();
+        assert_eq!(t.bytes[6], value as u8);
+    }
+
+    #[test]
+    fn test_mock_example() {
+        bitfield! {
+            ConfigAddress {
+                (register_offset, 8),  // Offset into a 256 byte configuration space 
+                (function_number, 3),
+                (device_number, 5),
+                (bus_number, 8),
+                (reserved, 7),
+                (enable, 1),
+            }
+        }
+        impl ConfigAddress {
+            pub fn masked_new(bus: u8, slot: u8, func: u8, offset: u8) -> Result<Self, crate::errors::BitfieldError> {
+                Self::checked_new(offset, func & 0xE, func & 0xF8, bus, true)
+            }
+
+            pub fn checked_new(register_offset: u8, func: u8, device: u8, bus: u8, enable: bool) -> Result<Self, crate::errors::BitfieldError> {        
+               let mut obj = Self::__new();
+               obj.set_register_offset(register_offset.into())?;
+               obj.set_function_number(func.into())?;
+               obj.set_device_number(device.into())?;
+               obj.set_bus_number(bus.into())?;
+               obj.set_enable(if enable { 1 } else { 0 })?;
+               Ok(obj)
+            }
+
+            /// Bitwise operation either selects first or second word from the 32-bit
+            /// value provided by it.
+            #[inline]
+            pub fn get_offset_word(&self, value: u32) -> u16 {
+                ((value >> ((self.get_register_offset() & 2) << 3)) & 0xFFFF) as u16
+            }
+
+            #[inline]
+            pub fn get(&self) -> u32 {
+                unsafe { *(self.bytes.as_ptr() as *const u32) }
+            }
+        }
+        let config = ConfigAddress::checked_new(0x0A, 0, 0, 0, true).unwrap();
+        assert_eq!((1 << 31) | 0x0A, config.get());
     }
 }
