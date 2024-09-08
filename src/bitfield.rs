@@ -88,10 +88,7 @@ macro_rules! bitfield {
                         let mut byte_index = Self::byte_index(start_bit);
                         let mut current_bit = start_bit + $crate::bitfield::BITS_IN_BYTE;
                         let mut value = self.bytes[byte_index] as usize;
-                        println!("{:?}", self.bytes);
-                        println!("{}, {}, {}, {}", start_bit, end_bit, start_offset, end_offset);
                         while current_bit <= end_bit {
-                            println!("{:032b}, {:08b}", value, self.bytes[byte_index]);
                             value <<= $crate::bitfield::BITS_IN_BYTE;
                             value |= self.bytes[byte_index] as usize;
                             current_bit += $crate::bitfield::BITS_IN_BYTE;
