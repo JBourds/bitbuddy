@@ -74,23 +74,35 @@ macro_rules! bitfield {
         $crate::paste::paste! {
             $(
                 impl $name {
+                    /// Cap at number of bits in usize
                     pub fn [<get_ $field>](&self) -> usize {
+                        if $bits > $crate::BITS_IN_WORD {
+                            panic!("Don't support get/set operations on bitfields with more bits than in a word.");
+                        } else if $bits <= 0 {
+                            panic!("Need a positive, non-negative number of bytes.");
+                        }
                         let start_bit = shift!($field);
                         let end_bit = start_bit + $bits;
                         let start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
-                        let end_offset = $crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE;
+                        let end_offset = ($crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE) & 7;
                         let mut byte_index = Self::byte_index(start_bit);
-                        let mut current_bit = start_bit;
-                        let mut value = 0;
-
+                        let mut current_bit = start_bit + $crate::bitfield::BITS_IN_BYTE;
+                        let mut value = self.bytes[byte_index] as usize;
+                        println!("{:?}", self.bytes);
+                        println!("{}, {}, {}, {}", start_bit, end_bit, start_offset, end_offset);
                         while current_bit <= end_bit {
+                            println!("{:032b}, {:08b}", value, self.bytes[byte_index]);
                             value <<= $crate::bitfield::BITS_IN_BYTE;
-                            value |= ((self.bytes[byte_index] as usize) >> (start_offset));
-                            let start_offset = 0; // Only have an offset for the first loop
+                            value |= self.bytes[byte_index] as usize;
                             current_bit += $crate::bitfield::BITS_IN_BYTE;
                             byte_index += 1;
                         }
-                        value >>= end_offset;
+
+                        // We know this value will always be between 0 and 31
+                        #[allow(arithmetic_overflow)]
+                        let mask = core::usize::MAX >> ($crate::BITS_IN_WORD - $bits);
+                        value >>= start_offset;
+                        value &= mask;
 
                         value
                     }
@@ -189,12 +201,19 @@ mod tests {
 
         let mut t = Test::__new();
         for i in 0..t.size_bytes() {
-            t.bytes[i] = core::u8::MAX ;
+            t.bytes[i] = core::u8::MAX;
         }
         assert_eq!(t.get_a(), core::u32::MAX as usize);
         assert_eq!(t.get_b(), core::u16::MAX as usize);
         assert_eq!(t.get_c(), (core::u8::MAX >> 3) as usize);
         assert_eq!(t.get_d(), 1);
+
+        t.bytes[3] = 0;
+        assert_eq!(t.get_a(), (core::u32::MAX as usize) & 0xFFFFFF00);
+        t.bytes[1] = 0;
+        assert_eq!(t.get_a(), (core::u32::MAX as usize) & 0xFF00FF00);
+        t.bytes[3] = 5;
+        assert_eq!(t.get_a(), ((core::u32::MAX as usize) & 0xFF00FF00) + 5);
     }
 
     #[test]
@@ -279,7 +298,14 @@ mod tests {
                 unsafe { *(self.bytes.as_ptr() as *const u32) }
             }
         }
-        let config = ConfigAddress::checked_new(0x0A, 0, 0, 0, true).unwrap();
-        assert_eq!((1 << 31) | 0x0A, config.get());
+        let config = ConfigAddress::checked_new(0x0A, 3, 5, 2, true).unwrap();
+        let expected = (1 << 31) | 0x0A | (3 << 8) | (5 << 11) | (2 << 16);
+        assert_eq!(expected, config.get());
+        assert_eq!(0x0A, config.get_register_offset());
+        assert_eq!(3, config.get_function_number());
+        assert_eq!(5, config.get_device_number());
+        assert_eq!(2, config.get_bus_number());
+        assert_eq!(0, config.get_reserved());
+        assert_eq!(1, config.get_enable());
     }
 }
