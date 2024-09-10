@@ -66,7 +66,7 @@ macro_rules! bitfield {
             }
 
             #[inline]
-            pub fn size_bytes(&self) -> usize {
+            fn size_bytes(&self) -> usize {
                 self.bytes.len()
             }
         }
@@ -75,7 +75,8 @@ macro_rules! bitfield {
             $(
                 impl $name {
                     /// Cap at number of bits in usize
-                    pub fn [<get_ $field>](&self) -> usize {
+                    #[allow(non_snake_case)]
+                    fn [<__get_ $field>](&self) -> usize {
                         if $bits > $crate::BITS_IN_WORD {
                             panic!("Don't support get/set operations on bitfields with more bits than in a word.");
                         } else if $bits <= 0 {
@@ -104,7 +105,8 @@ macro_rules! bitfield {
                         value
                     }
                     
-                    pub fn [<set_ $field>](&mut self, mut value: usize) -> Result<bool, $crate::errors::BitfieldError> {
+                    #[allow(non_snake_case)]
+                    fn [<__set_ $field>](&mut self, mut value: usize) -> Result<bool, $crate::errors::BitfieldError> {
                         if value > (2_usize.pow($bits) - 1) {
                             return Err($crate::errors::BitfieldError::ValueTooLarge { value, num_bits: $bits });
                         }
@@ -182,7 +184,7 @@ mod tests {
         }
         let t = Test5::__new();
         assert_eq!(t.size_bytes(), 2);
-        t.get_reserved();
+        t.__get_reserved();
     }
 
     #[test]
@@ -200,17 +202,17 @@ mod tests {
         for i in 0..t.size_bytes() {
             t.bytes[i] = core::u8::MAX;
         }
-        assert_eq!(t.get_a(), core::u32::MAX as usize);
-        assert_eq!(t.get_b(), core::u16::MAX as usize);
-        assert_eq!(t.get_c(), (core::u8::MAX >> 3) as usize);
-        assert_eq!(t.get_d(), 1);
+        assert_eq!(t.__get_a(), core::u32::MAX as usize);
+        assert_eq!(t.__get_b(), core::u16::MAX as usize);
+        assert_eq!(t.__get_c(), (core::u8::MAX >> 3) as usize);
+        assert_eq!(t.__get_d(), 1);
 
         t.bytes[3] = 0;
-        assert_eq!(t.get_a(), (core::u32::MAX as usize) & 0xFFFFFF00);
+        assert_eq!(t.__get_a(), (core::u32::MAX as usize) & 0xFFFFFF00);
         t.bytes[1] = 0;
-        assert_eq!(t.get_a(), (core::u32::MAX as usize) & 0xFF00FF00);
+        assert_eq!(t.__get_a(), (core::u32::MAX as usize) & 0xFF00FF00);
         t.bytes[3] = 5;
-        assert_eq!(t.get_a(), ((core::u32::MAX as usize) & 0xFF00FF00) + 5);
+        assert_eq!(t.__get_a(), ((core::u32::MAX as usize) & 0xFF00FF00) + 5);
     }
 
     #[test]
@@ -227,9 +229,9 @@ mod tests {
         let mut t = Test::__new();
         assert_eq!(7, t.size_bytes());
         // Overwrite behavior gets rid of extra bits
-        t.set_a(7).unwrap();
+        t.__set_a(7).unwrap();
         assert_eq!(t.bytes[0], 7);
-        t.set_a(6).unwrap();
+        t.__set_a(6).unwrap();
         assert_eq!(t.bytes[0], 6);
 
         // Check writing a value too larger
@@ -238,21 +240,21 @@ mod tests {
             value: value,
             num_bits: 5,
         });
-        assert_eq!(t.set_c(value), expected);
+        assert_eq!(t.__set_c(value), expected);
         let expected = [6, 0, 0, 0, 0, 0, 0];
         assert_eq!(expected, t.bytes);
 
         // Check maximum value
         let value = 2_usize.pow(5) - 1;
-        t.set_c(value).unwrap();
+        t.__set_c(value).unwrap();
         let expected = [6, 0, 0, 0, 0, 0, value as u8];
         assert_eq!(expected, t.bytes);
 
         // Verify setting a single bit works
         assert_eq!(t.bytes[6], value as u8);
-        t.set_d(1).unwrap();
+        t.__set_d(1).unwrap();
         assert_eq!(t.bytes[6], (1 << 5) | value as u8);
-        t.set_d(0).unwrap();
+        t.__set_d(0).unwrap();
         assert_eq!(t.bytes[6], value as u8);
     }
 
@@ -275,19 +277,19 @@ mod tests {
 
             pub fn checked_new(register_offset: u8, func: u8, device: u8, bus: u8, enable: bool) -> Result<Self, crate::errors::BitfieldError> {        
                let mut obj = Self::__new();
-               obj.set_register_offset(register_offset.into())?;
-               obj.set_function_number(func.into())?;
-               obj.set_device_number(device.into())?;
-               obj.set_bus_number(bus.into())?;
-               obj.set_enable(if enable { 1 } else { 0 })?;
+               obj.__set_register_offset(register_offset.into())?;
+               obj.__set_function_number(func.into())?;
+               obj.__set_device_number(device.into())?;
+               obj.__set_bus_number(bus.into())?;
+               obj.__set_enable(if enable { 1 } else { 0 })?;
                Ok(obj)
             }
 
             /// Bitwise operation either selects first or second word from the 32-bit
             /// value provided by it.
             #[inline]
-            pub fn get_offset_word(&self, value: u32) -> u16 {
-                ((value >> ((self.get_register_offset() & 2) << 3)) & 0xFFFF) as u16
+            pub fn __get_off__set_word(&self, value: u32) -> u16 {
+                ((value >> ((self.__get_register_offset() & 2) << 3)) & 0xFFFF) as u16
             }
 
             #[inline]
@@ -298,11 +300,11 @@ mod tests {
         let config = ConfigAddress::checked_new(0x0A, 3, 5, 2, true).unwrap();
         let expected = (1 << 31) | 0x0A | (3 << 8) | (5 << 11) | (2 << 16);
         assert_eq!(expected, config.get());
-        assert_eq!(0x0A, config.get_register_offset());
-        assert_eq!(3, config.get_function_number());
-        assert_eq!(5, config.get_device_number());
-        assert_eq!(2, config.get_bus_number());
-        assert_eq!(0, config.get_reserved());
-        assert_eq!(1, config.get_enable());
+        assert_eq!(0x0A, config.__get_register_offset());
+        assert_eq!(3, config.__get_function_number());
+        assert_eq!(5, config.__get_device_number());
+        assert_eq!(2, config.__get_bus_number());
+        assert_eq!(0, config.__get_reserved());
+        assert_eq!(1, config.__get_enable());
     }
 }
