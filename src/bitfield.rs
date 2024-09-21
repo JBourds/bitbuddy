@@ -23,7 +23,11 @@ macro_rules! bytes_required {
 
 #[macro_export]
 macro_rules! bitfield {
-    ($name:ident { $(($field:ident, $bits:expr)),* $(,)? }) => {
+    ($name:ident 
+     $(with $($derive:ident),+ $(,)?)? 
+     { 
+         $(($field:ident, $bits:expr)),* $(,)? 
+     }) => {
         // TODO: Compile time check for number of bits?
         // TODO: Have way to exclude get/set methods for fields with a
         // certain name?
@@ -47,7 +51,8 @@ macro_rules! bitfield {
         }
 
 
-        #[derive(Copy, Clone, Debug, Default)]
+        //#[derive($(, $($derive)*)?)]
+        #[derive($($($derive),*)?)]
         #[repr(packed)]
         pub struct $name {
             bytes: [u8; $crate::bytes_required!($($bits),*)],
@@ -306,5 +311,19 @@ mod tests {
         assert_eq!(2, config.__get_bus_number());
         assert_eq!(0, config.__get_reserved());
         assert_eq!(1, config.__get_enable());
+    }
+
+    #[test]
+    fn test_derive() {
+        bitfield! {
+            Printable 
+            with Default, Clone {
+                (field1, 4),
+                (field2, 4),
+            }
+        }
+        
+        let t = Printable::default();
+        let cloned = t.clone();
     }
 }
