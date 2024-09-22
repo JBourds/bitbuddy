@@ -87,18 +87,24 @@ macro_rules! bitfield {
                         } else if $bits <= 0 {
                             panic!("Need a positive, non-negative number of bytes.");
                         }
-                        let start_bit = shift!($field);
-                        let end_bit = start_bit + $bits;
-                        let start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
+
+                        let mut current_bit = shift!($field);
+                        let end_bit = current_bit + $bits;
+
+                        let start_offset = current_bit % $crate::bitfield::BITS_IN_BYTE;
                         let end_offset = ($crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE) & 7;
-                        let mut byte_index = Self::byte_index(start_bit);
-                        let mut current_bit = start_bit + $crate::bitfield::BITS_IN_BYTE;
+
+                        let mut byte_index = Self::byte_index(current_bit);
+
                         let mut value = self.bytes[byte_index] as usize;
-                        while current_bit <= end_bit {
-                            value <<= $crate::bitfield::BITS_IN_BYTE;
-                            value |= self.bytes[byte_index] as usize;
-                            current_bit += $crate::bitfield::BITS_IN_BYTE;
+                        current_bit += $crate::bitfield::BITS_IN_BYTE - start_offset;
+
+                        let mut byte_number = 0;
+                        while current_bit < end_bit {
                             byte_index += 1;
+                            byte_number += 1;
+                            value |= ((self.bytes[byte_index] as usize) << (byte_number * $crate::BITS_IN_BYTE));
+                            current_bit += $crate::bitfield::BITS_IN_BYTE;
                         }
 
                         // We know this value will always be between 0 and 31
@@ -213,11 +219,11 @@ mod tests {
         assert_eq!(t.__get_d(), 1);
 
         t.bytes[3] = 0;
-        assert_eq!(t.__get_a(), (core::u32::MAX as usize) & 0xFFFFFF00);
+        assert_eq!(t.__get_a(), (core::u32::MAX as usize) & 0x00FFFFFF);
         t.bytes[1] = 0;
-        assert_eq!(t.__get_a(), (core::u32::MAX as usize) & 0xFF00FF00);
+        assert_eq!(t.__get_a(), (core::u32::MAX as usize) & 0x00FF00FF);
         t.bytes[3] = 5;
-        assert_eq!(t.__get_a(), ((core::u32::MAX as usize) & 0xFF00FF00) + 5);
+        assert_eq!(t.__get_a(), (core::u32::MAX as usize) & 0x05FF00FF);
     }
 
     #[test]
@@ -311,6 +317,94 @@ mod tests {
         assert_eq!(2, config.__get_bus_number());
         assert_eq!(0, config.__get_reserved());
         assert_eq!(1, config.__get_enable());
+    }
+
+    #[test]
+    fn test_mock_example_2() {
+
+        bitfield! {
+            PageTableEntry
+            with Clone, Copy, Debug, PartialEq {
+                (present, 1),
+                (rw, 1),
+                (user, 1),
+                (write_through, 1),
+                (cache_disable, 1),
+                (accessed, 1),
+                (dirty, 1),
+                (page_attribute, 1),
+                (global, 1),
+                (available, 3), // Unused by processor
+                (frame, 20),
+            }
+        }
+
+        impl PageTableEntry {
+            fn set_frame(&mut self, frame_addr: u32) { self.__set_frame((frame_addr >> 12) as usize).unwrap(); }
+            fn get_frame(&self) -> u32 { (self.__get_frame() << 12) as u32 }   
+
+            fn is_present(&self) -> bool { self.__get_present() == 1 }
+            fn set_present(&mut self, present: bool) { self.__set_present(if present { 1 } else { 0 }).unwrap(); }
+
+            fn set_writable(&mut self, writable: bool) { self.__set_rw(if writable { 1 } else { 0 }).unwrap(); }
+            fn is_writable(&self) -> bool { self.__get_rw() == 1 }
+
+            fn set_user(&mut self, user: bool) { self.__set_user(if user { 1 } else { 0 }).unwrap(); }
+            fn is_user(&self) -> bool { self.__get_user() == 1 }
+
+            fn set_write_through(&mut self, write_through: bool) { self.__set_write_through(if write_through { 1 } else { 0 }).unwrap(); }
+            fn is_write_through(&self) -> bool { self.__get_write_through() == 1 }
+
+            fn set_cacheable(&mut self, cacheable: bool) { self.__set_cache_disable(if cacheable { 0 } else { 1 }).unwrap(); }
+            fn is_cacheable(&self) -> bool { self.__get_cache_disable() == 1 }
+
+            fn set_accessed(&mut self, accessed: bool) { self.__set_accessed(if accessed { 1 } else { 0 }).unwrap(); }
+            fn is_accessed(&self) -> bool { self.__get_accessed() == 1 }
+        }
+
+        impl AsRef<u32> for PageTableEntry {
+            fn as_ref(&self) -> &u32 {
+                let ptr = self.bytes.as_ptr() as *const u32;
+                unsafe { &*ptr }
+            }
+        }
+
+        impl From<u32> for PageTableEntry {
+            fn from(value: u32) -> Self {
+                Self {
+                    bytes: value.to_le_bytes(),
+                }
+            }
+        }
+
+        impl Default for PageTableEntry {
+            fn default() -> Self {
+                let mut obj = Self::__new();
+                obj.set_writable(true);
+                obj.set_present(true);
+                obj
+            }
+        }
+
+        impl PageTableEntry {
+            fn gframe(&self) -> u32 { (self.__get_frame()) as u32 }   
+            pub fn set_dirty(&mut self, dirty: bool) { self.__set_dirty(if dirty { 1 } else { 0 }).unwrap(); }
+            pub fn is_dirty(&self) -> bool { self.__get_dirty() == 1 }
+
+            pub fn set_page_attribute(&mut self, page_attribute: bool) { self.__set_page_attribute(if page_attribute { 1 } else { 0 }).unwrap(); }
+            pub fn is_page_attribute(&self) -> bool { self.__get_page_attribute() == 1 }
+
+            pub fn set_global(&mut self, global: bool) { self.__set_global(if global { 1 } else { 0 }).unwrap(); }
+            pub fn is_global(&self) -> bool { self.__get_global() == 1 }
+        }
+
+        let address = 0x200000;
+        let mut entry = PageTableEntry::default();
+        assert_eq!(*entry.as_ref(), 0x3);
+        entry.set_frame(address);
+        println!("0x{:0X}, 0x{:0X}", address, entry.get_frame());
+        assert_eq!(*entry.as_ref(), 0x200003);
+        assert_eq!(address, entry.get_frame());
     }
 
     #[test]
