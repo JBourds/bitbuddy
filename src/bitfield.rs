@@ -23,10 +23,10 @@ macro_rules! bytes_required {
 
 #[macro_export]
 macro_rules! bitfield {
-    ($name:ident 
-     $(with $($derive:ident),+ $(,)?)? 
-     { 
-         $(($field:ident, $bits:expr)),* $(,)? 
+    ($name:ident
+     $(with $($derive:ident),+ $(,)?)?
+     {
+         $(($field:ident, $bits:expr)),* $(,)?
      }) => {
         // TODO: Compile time check for number of bits?
         // TODO: Have way to exclude get/set methods for fields with a
@@ -51,7 +51,6 @@ macro_rules! bitfield {
         }
 
 
-        //#[derive($(, $($derive)*)?)]
         #[derive($($($derive),*)?)]
         #[repr(packed)]
         pub struct $name {
@@ -73,6 +72,20 @@ macro_rules! bitfield {
             #[inline]
             fn size_bytes(&self) -> usize {
                 self.bytes.len()
+            }
+        }
+
+        // Auto-implement a debug formatting which displays
+        // binary values for each register.
+        impl core::fmt::Debug for $name {
+            fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                let mut debug_struct = fmt.debug_struct(stringify!($name));
+                $crate::paste::paste! {
+                    $(
+                        debug_struct.field(stringify!($field), &format_args!("0b{:b}", self.[< __get_ $field>]()));
+                    )*
+                    debug_struct.finish()
+                }
             }
         }
 
@@ -115,7 +128,7 @@ macro_rules! bitfield {
 
                         value
                     }
-                    
+
                     #[allow(non_snake_case)]
                     fn [<__set_ $field>](&mut self, mut value: usize) -> Result<bool, $crate::errors::BitfieldError> {
                         if value > (2_usize.pow($bits) - 1) {
@@ -124,23 +137,21 @@ macro_rules! bitfield {
 
                         let start_bit = shift!($field);
                         let end_bit = start_bit + $bits;
-                        let start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
+                        let mut start_offset = start_bit % $crate::bitfield::BITS_IN_BYTE;
                         let end_offset = $crate::bitfield::BITS_IN_BYTE - end_bit % $crate::BITS_IN_BYTE;
                         let mut byte_index = Self::byte_index(start_bit);
+                        let mut mask = (2_usize.pow($bits as u32) - 1);
                         let mut current_bit = start_bit;
+                        while current_bit < end_bit {
+                            let byte_value = ((mask as u8) & (value as u8)) << start_offset;
+                            self.bytes[byte_index] &= !((mask << start_offset) as u8);
+                            self.bytes[byte_index] |= byte_value;
 
-                        let mut mask = (2_usize.pow($bits as u32) - 1) << start_offset;
-                        while current_bit <= end_bit {
-                            let byte_value = (value << start_offset & mask) >> start_offset;
-
-                            self.bytes[byte_index] &= !mask as u8;
-                            self.bytes[byte_index] |= (byte_value << start_offset) as u8;
-                            let start_offset = 0; // Offset only applies for first loop
-
-                            current_bit += $crate::bitfield::BITS_IN_BYTE;
+                            current_bit += ($crate::bitfield::BITS_IN_BYTE - start_offset);
+                            mask >>= ($crate::bitfield::BITS_IN_BYTE - start_offset);
+                            value >>= ($crate::bitfield::BITS_IN_BYTE - start_offset);
+                            start_offset = 0;
                             byte_index += 1;
-                            mask >>= $crate::bitfield::BITS_IN_BYTE;
-                            value >>= $crate::bitfield::BITS_IN_BYTE;
                         }
 
                         Ok(true)
@@ -227,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_set() { 
+    fn test_struct_set() {
         bitfield! {
             Test {
                 (a, 32),
@@ -270,10 +281,31 @@ mod tests {
     }
 
     #[test]
+    fn test_get_set_uneven() {
+        // Test setting when a struct does not have even increment bits
+        bitfield! {
+            Uneven
+            with Default {
+                (a, 3),
+                (b, 7),
+                (c, 5),
+            }
+        }
+
+        let mut t = Uneven::default();
+        t.__set_a(0b101).unwrap();
+        t.__set_b(0b1100101).unwrap();
+        t.__set_c(0b10111).unwrap();
+        assert_eq!(0b101, t.__get_a());
+        assert_eq!(0b1100101, t.__get_b());
+        assert_eq!(0b10111, t.__get_c());
+    }
+
+    #[test]
     fn test_mock_example() {
         bitfield! {
             ConfigAddress {
-                (register_offset, 8),  // Offset into a 256 byte configuration space 
+                (register_offset, 8),  // Offset into a 256 byte configuration space
                 (function_number, 3),
                 (device_number, 5),
                 (bus_number, 8),
@@ -282,18 +314,29 @@ mod tests {
             }
         }
         impl ConfigAddress {
-            pub fn masked_new(bus: u8, slot: u8, func: u8, offset: u8) -> Result<Self, crate::errors::BitfieldError> {
+            pub fn masked_new(
+                bus: u8,
+                slot: u8,
+                func: u8,
+                offset: u8,
+            ) -> Result<Self, crate::errors::BitfieldError> {
                 Self::checked_new(offset, func & 0xE, func & 0xF8, bus, true)
             }
 
-            pub fn checked_new(register_offset: u8, func: u8, device: u8, bus: u8, enable: bool) -> Result<Self, crate::errors::BitfieldError> {        
-               let mut obj = Self::__new();
-               obj.__set_register_offset(register_offset.into())?;
-               obj.__set_function_number(func.into())?;
-               obj.__set_device_number(device.into())?;
-               obj.__set_bus_number(bus.into())?;
-               obj.__set_enable(if enable { 1 } else { 0 })?;
-               Ok(obj)
+            pub fn checked_new(
+                register_offset: u8,
+                func: u8,
+                device: u8,
+                bus: u8,
+                enable: bool,
+            ) -> Result<Self, crate::errors::BitfieldError> {
+                let mut obj = Self::__new();
+                obj.__set_register_offset(register_offset.into())?;
+                obj.__set_function_number(func.into())?;
+                obj.__set_device_number(device.into())?;
+                obj.__set_bus_number(bus.into())?;
+                obj.__set_enable(if enable { 1 } else { 0 })?;
+                Ok(obj)
             }
 
             /// Bitwise operation either selects first or second word from the 32-bit
@@ -319,12 +362,12 @@ mod tests {
         assert_eq!(1, config.__get_enable());
     }
 
+    #[cfg(not(feature = "no_std"))]
     #[test]
     fn test_mock_example_2() {
-
         bitfield! {
             PageTableEntry
-            with Clone, Copy, Debug, PartialEq {
+            with Clone, Copy, PartialEq {
                 (present, 1),
                 (rw, 1),
                 (user, 1),
@@ -340,26 +383,56 @@ mod tests {
         }
 
         impl PageTableEntry {
-            fn set_frame(&mut self, frame_addr: u32) { self.__set_frame((frame_addr >> 12) as usize).unwrap(); }
-            fn get_frame(&self) -> u32 { (self.__get_frame() << 12) as u32 }   
+            fn set_frame(&mut self, frame_addr: u32) {
+                self.__set_frame((frame_addr >> 12) as usize).unwrap();
+            }
+            fn get_frame(&self) -> u32 {
+                (self.__get_frame() << 12) as u32
+            }
 
-            fn is_present(&self) -> bool { self.__get_present() == 1 }
-            fn set_present(&mut self, present: bool) { self.__set_present(if present { 1 } else { 0 }).unwrap(); }
+            fn is_present(&self) -> bool {
+                self.__get_present() == 1
+            }
+            fn set_present(&mut self, present: bool) {
+                self.__set_present(if present { 1 } else { 0 }).unwrap();
+            }
 
-            fn set_writable(&mut self, writable: bool) { self.__set_rw(if writable { 1 } else { 0 }).unwrap(); }
-            fn is_writable(&self) -> bool { self.__get_rw() == 1 }
+            fn set_writable(&mut self, writable: bool) {
+                self.__set_rw(if writable { 1 } else { 0 }).unwrap();
+            }
+            fn is_writable(&self) -> bool {
+                self.__get_rw() == 1
+            }
 
-            fn set_user(&mut self, user: bool) { self.__set_user(if user { 1 } else { 0 }).unwrap(); }
-            fn is_user(&self) -> bool { self.__get_user() == 1 }
+            fn set_user(&mut self, user: bool) {
+                self.__set_user(if user { 1 } else { 0 }).unwrap();
+            }
+            fn is_user(&self) -> bool {
+                self.__get_user() == 1
+            }
 
-            fn set_write_through(&mut self, write_through: bool) { self.__set_write_through(if write_through { 1 } else { 0 }).unwrap(); }
-            fn is_write_through(&self) -> bool { self.__get_write_through() == 1 }
+            fn set_write_through(&mut self, write_through: bool) {
+                self.__set_write_through(if write_through { 1 } else { 0 })
+                    .unwrap();
+            }
+            fn is_write_through(&self) -> bool {
+                self.__get_write_through() == 1
+            }
 
-            fn set_cacheable(&mut self, cacheable: bool) { self.__set_cache_disable(if cacheable { 0 } else { 1 }).unwrap(); }
-            fn is_cacheable(&self) -> bool { self.__get_cache_disable() == 1 }
+            fn set_cacheable(&mut self, cacheable: bool) {
+                self.__set_cache_disable(if cacheable { 0 } else { 1 })
+                    .unwrap();
+            }
+            fn is_cacheable(&self) -> bool {
+                self.__get_cache_disable() == 1
+            }
 
-            fn set_accessed(&mut self, accessed: bool) { self.__set_accessed(if accessed { 1 } else { 0 }).unwrap(); }
-            fn is_accessed(&self) -> bool { self.__get_accessed() == 1 }
+            fn set_accessed(&mut self, accessed: bool) {
+                self.__set_accessed(if accessed { 1 } else { 0 }).unwrap();
+            }
+            fn is_accessed(&self) -> bool {
+                self.__get_accessed() == 1
+            }
         }
 
         impl AsRef<u32> for PageTableEntry {
@@ -387,15 +460,30 @@ mod tests {
         }
 
         impl PageTableEntry {
-            fn gframe(&self) -> u32 { (self.__get_frame()) as u32 }   
-            pub fn set_dirty(&mut self, dirty: bool) { self.__set_dirty(if dirty { 1 } else { 0 }).unwrap(); }
-            pub fn is_dirty(&self) -> bool { self.__get_dirty() == 1 }
+            fn gframe(&self) -> u32 {
+                (self.__get_frame()) as u32
+            }
+            pub fn set_dirty(&mut self, dirty: bool) {
+                self.__set_dirty(if dirty { 1 } else { 0 }).unwrap();
+            }
+            pub fn is_dirty(&self) -> bool {
+                self.__get_dirty() == 1
+            }
 
-            pub fn set_page_attribute(&mut self, page_attribute: bool) { self.__set_page_attribute(if page_attribute { 1 } else { 0 }).unwrap(); }
-            pub fn is_page_attribute(&self) -> bool { self.__get_page_attribute() == 1 }
+            pub fn set_page_attribute(&mut self, page_attribute: bool) {
+                self.__set_page_attribute(if page_attribute { 1 } else { 0 })
+                    .unwrap();
+            }
+            pub fn is_page_attribute(&self) -> bool {
+                self.__get_page_attribute() == 1
+            }
 
-            pub fn set_global(&mut self, global: bool) { self.__set_global(if global { 1 } else { 0 }).unwrap(); }
-            pub fn is_global(&self) -> bool { self.__get_global() == 1 }
+            pub fn set_global(&mut self, global: bool) {
+                self.__set_global(if global { 1 } else { 0 }).unwrap();
+            }
+            pub fn is_global(&self) -> bool {
+                self.__get_global() == 1
+            }
         }
 
         let address = 0x200000;
@@ -410,14 +498,39 @@ mod tests {
     #[test]
     fn test_derive() {
         bitfield! {
-            Printable 
+            Printable
             with Default, Clone {
                 (field1, 4),
                 (field2, 4),
             }
         }
-        
+
         let t = Printable::default();
         let cloned = t.clone();
+    }
+
+    #[cfg(not(feature = "no_std"))]
+    #[test]
+    fn test_debug_print() {
+        bitfield! {
+            B
+            with Default {
+                (field1, 4),
+                (field2, 6),
+                (field3, 2),
+            }
+        }
+        let mut b = B::default();
+        b.__set_field1(0b1010).unwrap();
+        b.__set_field2(0b110011).unwrap();
+        b.__set_field3(0b11).unwrap();
+        println!("{:#?}", b);
+        println!("{:016b}", unsafe { *(&b.bytes as *const _ as *const u16) });
+        println!(
+            "field1: {:b}, field2: {:b}, field3: {:b}",
+            b.__get_field1(),
+            b.__get_field2(),
+            b.__get_field3()
+        );
     }
 }
